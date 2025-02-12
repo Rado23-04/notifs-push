@@ -1,118 +1,122 @@
+import React, { useEffect } from 'react';
+import { ActivityIndicator, PermissionsAndroid } from 'react-native';
+import messaging from '@react-native-firebase/messaging';
+import { Linking } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+import Home from './components/Home';
+import Setting from './components/Setting';
+
+const Stack = createStackNavigator();
+const NAVIGATION_IDS = ['home', 'settings'];
+
 /**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
+ * Builds a deep link URL based on notification data.
+ * If the navigationId is invalid, it returns null.
  */
+function buildDeepLinkFromNotificationData(data: Record<string, any>): string | null {
+  const navigationId = data?.navigationId;
+  console.log('Notification data:', data); // Debugging: log received notification data
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
-import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+  if (!NAVIGATION_IDS.includes(navigationId)) {
+    console.warn('Unverified navigationId:', navigationId);
+    return null; // Return null for unverified navigation IDs
+  }
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
-
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
-
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
+  return `myapp://${navigationId}`;
 }
+
+/**
+ * Linking configuration for deep linking and notification handling.
+ */
+const linking = {
+  prefixes: ['myapp://'],
+  config: {
+    screens: {
+      Home: 'home',
+      Settings: 'settings',
+    },
+  },
+  async getInitialURL(): Promise<string | null> {
+    try {
+      // Check if the app was opened with a URL (deep linking)
+      const url = await Linking.getInitialURL();
+      if (url) {
+        return url;
+      }
+
+      // Check if the app was opened via a notification
+      const message = await messaging().getInitialNotification();
+      if (message?.data) {
+        const deeplinkURL = buildDeepLinkFromNotificationData(message.data);
+        if (deeplinkURL) {
+          return deeplinkURL;
+        }
+      }
+    } catch (error) {
+      console.error('Error in getInitialURL:', error);
+    }
+
+    return null; // Return null if no valid URL is found
+  },
+  subscribe(listener: (url: string) => void) {
+    const onReceiveURL = ({ url }: { url: string }) => listener(url);
+
+    // Listen to incoming links (deep linking)
+    const linkingSubscription = Linking.addEventListener('url', onReceiveURL);
+
+    // Handle notifications in the foreground
+    const foregroundNotification = messaging().onMessage(async (remoteMessage) => {
+      console.log('Foreground FCM message received:', remoteMessage);
+    });
+
+    // Handle notifications when the app is in the background
+    const unsubscribeNotification = messaging().onNotificationOpenedApp((remoteMessage) => {
+      const url = buildDeepLinkFromNotificationData(remoteMessage?.data || {});
+      if (url) {
+        listener(url);
+      }
+    });
+
+    return () => {
+      linkingSubscription.remove();
+      unsubscribeNotification();
+      foregroundNotification();
+    };
+  },
+};
 
 function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  useEffect(() => {
+    const requestUserPermission = async () => {
+      // Request notification permissions
+      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
+      const authStatus = await messaging().requestPermission();
+      const isEnabled =
+        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+      if (isEnabled) {
+        console.log('Notification permissions granted:', authStatus);
+        const token = await messaging().getToken();
+        console.log('FCM token:', token);
+      } else {
+        console.warn('Notification permissions not granted.');
+      }
+    };
+
+    requestUserPermission();
+  }, []);
 
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+    <NavigationContainer linking={linking} fallback={<ActivityIndicator animating />}>
+      <Stack.Navigator initialRouteName="Home">
+        <Stack.Screen name="Home" component={Home} />
+        <Stack.Screen name="Settings" component={Setting} />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
 
 export default App;
