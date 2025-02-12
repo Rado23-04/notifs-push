@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, PermissionsAndroid } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
+import notifee, { AndroidImportance } from '@notifee/react-native';
 import { Linking } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -10,25 +11,18 @@ import Setting from './components/Setting';
 const Stack = createStackNavigator();
 const NAVIGATION_IDS = ['home', 'settings'];
 
-/**
- * Builds a deep link URL based on notification data.
- * If the navigationId is invalid, it returns null.
- */
 function buildDeepLinkFromNotificationData(data: Record<string, any>): string | null {
   const navigationId = data?.navigationId;
-  console.log('Notification data:', data); // Debugging: log received notification data
+  console.log('Notification data:', data);
 
   if (!NAVIGATION_IDS.includes(navigationId)) {
     console.warn('Unverified navigationId:', navigationId);
-    return null; // Return null for unverified navigation IDs
+    return null;
   }
 
   return `myapp://${navigationId}`;
 }
 
-/**
- * Linking configuration for deep linking and notification handling.
- */
 const linking = {
   prefixes: ['myapp://'],
   config: {
@@ -39,13 +33,11 @@ const linking = {
   },
   async getInitialURL(): Promise<string | null> {
     try {
-      // Check if the app was opened with a URL (deep linking)
       const url = await Linking.getInitialURL();
       if (url) {
         return url;
       }
 
-      // Check if the app was opened via a notification
       const message = await messaging().getInitialNotification();
       if (message?.data) {
         const deeplinkURL = buildDeepLinkFromNotificationData(message.data);
@@ -57,20 +49,26 @@ const linking = {
       console.error('Error in getInitialURL:', error);
     }
 
-    return null; // Return null if no valid URL is found
+    return null;
   },
   subscribe(listener: (url: string) => void) {
     const onReceiveURL = ({ url }: { url: string }) => listener(url);
 
-    // Listen to incoming links (deep linking)
     const linkingSubscription = Linking.addEventListener('url', onReceiveURL);
 
-    // Handle notifications in the foreground
     const foregroundNotification = messaging().onMessage(async (remoteMessage) => {
       console.log('Foreground FCM message received:', remoteMessage);
+
+      await notifee.displayNotification({
+        title: remoteMessage.notification?.title || 'Notification',
+        body: remoteMessage.notification?.body || 'You have a new message.',
+        android: {
+          channelId: 'default',
+          importance: AndroidImportance.HIGH,
+        },
+      });
     });
 
-    // Handle notifications when the app is in the background
     const unsubscribeNotification = messaging().onNotificationOpenedApp((remoteMessage) => {
       const url = buildDeepLinkFromNotificationData(remoteMessage?.data || {});
       if (url) {
@@ -89,7 +87,6 @@ const linking = {
 function App(): React.JSX.Element {
   useEffect(() => {
     const requestUserPermission = async () => {
-      // Request notification permissions
       await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
 
       const authStatus = await messaging().requestPermission();
@@ -106,7 +103,16 @@ function App(): React.JSX.Element {
       }
     };
 
+    const createNotificationChannel = async () => {
+      await notifee.createChannel({
+        id: 'default',
+        name: 'Default Channel',
+        importance: AndroidImportance.HIGH,
+      });
+    };
+
     requestUserPermission();
+    createNotificationChannel();
   }, []);
 
   return (
