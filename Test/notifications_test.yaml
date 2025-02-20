@@ -1,0 +1,18 @@
+appId: com.tonapp # Remplace par ton package Android
+---
+- launchApp:
+    clearState: true
+
+- assertVisible: "Home" 
+
+- tapOn: "Send Test Notification" 
+
+- extendedWaitUntil:
+    visible: "Notification"
+    timeout: 5000 
+
+- assertVisible: "You have a new message." 
+
+- tapOn: "Notification" 
+
+- assertVisible: "Settings"
